@@ -236,16 +236,16 @@ HTML = """
 
     <div id="controls" class="card">
       <div class="grid">
-        <button data-cmd="a">↩️</button>
-        <button data-cmd="z">⬆️</button>
-        <button data-cmd="e">↪️</button>
+        <button class="hold-btn" data-cmd="a">↩️</button>
+        <button class="hold-btn" data-cmd="z">⬆️</button>
+        <button class="hold-btn" data-cmd="e">↪️</button>
 
-        <button data-cmd="q">⬅️</button>
-        <button class="stop" data-cmd="x">🛑</button>
-        <button data-cmd="d">➡️</button>
+        <button class="hold-btn" data-cmd="q">⬅️</button>
+        <button class="stop hold-btn" data-cmd="x">🛑</button>
+        <button class="hold-btn" data-cmd="d">➡️</button>
 
         <div></div>
-        <button data-cmd="s">⬇️</button>
+        <button class="hold-btn" data-cmd="s">⬇️</button>
         <div></div>
       </div>
     </div>
@@ -254,6 +254,23 @@ HTML = """
       <label id="speedLabel">Vitesse : 200</label>
       <input id="speed" class="slider" type="range" min="0" max="255" value="200" />
       <div class="muted">0 → 255</div>
+    </div>
+
+    <div id="huskyControls" class="card">
+      <div class="title" style="margin-bottom:8px;">HuskyLens</div>
+      <div class="grid">
+        <button data-cmd="1">Visage</button>
+        <button data-cmd="2">Suivi</button>
+        <button data-cmd="3">Objet</button>
+
+        <button data-cmd="4">Ligne</button>
+        <button data-cmd="5">Couleur</button>
+        <button data-cmd="6">Tag</button>
+
+        <button id="setIdBtn">ID Cible</button>
+        <button data-cmd="r">Reset</button>
+        <div></div>
+      </div>
     </div>
   </div>
 
@@ -275,6 +292,7 @@ HTML = """
     const terminalBody = document.getElementById("terminalBody");
     const terminalHeader = document.getElementById("terminalHeader");
     const terminalContainer = document.getElementById("terminalContainer");
+    const setIdBtn = document.getElementById("setIdBtn");
 
     let autoMode = false;
 
@@ -296,17 +314,58 @@ HTML = """
       await fetch(`/mode/${type}`);
     });
 
+    // --- Envoi répétitif si appui long ---
+    const HOLD_INTERVAL_MS = 140;
+    let holdTimer = null;
+
+    function sendCmd(cmd) {
+      fetch(`/commande/${cmd}`);
+    }
+
+    function startHold(cmd) {
+      sendCmd(cmd);
+      holdTimer = setInterval(() => sendCmd(cmd), HOLD_INTERVAL_MS);
+    }
+
+    function endHold() {
+      if (holdTimer) {
+        clearInterval(holdTimer);
+        holdTimer = null;
+      }
+    }
+
     document.querySelectorAll("button[data-cmd]").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const cmd = btn.getAttribute("data-cmd");
-        await fetch(`/commande/${cmd}`);
-      });
+      const cmd = btn.getAttribute("data-cmd");
+
+      if (btn.classList.contains("hold-btn")) {
+        btn.addEventListener("pointerdown", (e) => {
+          e.preventDefault();
+          startHold(cmd);
+        });
+        btn.addEventListener("pointerup", endHold);
+        btn.addEventListener("pointerleave", endHold);
+        btn.addEventListener("pointercancel", endHold);
+        btn.addEventListener("click", (e) => e.preventDefault());
+      } else {
+        btn.addEventListener("click", async () => {
+          await fetch(`/commande/${cmd}`);
+        });
+      }
     });
+
+    window.addEventListener("pointerup", endHold);
 
     speed.addEventListener("input", async () => {
       const val = speed.value;
       speedLabel.textContent = `Vitesse : ${val}`;
       await fetch(`/vitesse/${val}`);
+    });
+
+    setIdBtn.addEventListener("click", async () => {
+      const id = prompt("Entrer l'ID cible HuskyLens (ex: 1)");
+      if (id !== null && id !== "") {
+        await fetch(`/husky/id/${id}`);
+      }
     });
 
     // RECEPTION EN FLUX CONTINU
@@ -331,13 +390,9 @@ HTML = """
       if (!isResizing) return;
       if (e.cancelable) e.preventDefault();
 
-      // Extrait la coordonnée verticale (Souris ou Point de contact tactile)
       const currentY = e.touches ? e.touches[0].clientY : e.clientY;
-      
-      // Calcule dynamiquement la hauteur requise depuis le bas de la fenêtre
       const computedHeight = window.innerHeight - currentY;
 
-      // Application des règles de butée haute et basse
       if (computedHeight >= 80 && computedHeight <= (window.innerHeight * 0.8)) {
         terminalContainer.style.height = `${computedHeight}px`;
       }
@@ -347,7 +402,6 @@ HTML = """
       isResizing = false;
     }
 
-    // Assignation des écouteurs de contrôle d'interface sur le conteneur principal
     terminalHeader.addEventListener('mousedown', initResize);
     window.addEventListener('mousemove', handleResize, { passive: false });
     window.addEventListener('mouseup', endResize);
@@ -397,6 +451,16 @@ def vitesse(valeur):
 def commande(direction):
     if direction:
         send_serial(direction[0])
+    return jsonify(ok=True)
+
+@app.route("/husky/id/<valeur>")
+def husky_id(valeur):
+    try:
+        v = int(valeur)
+        v = max(0, min(999, v))
+        send_serial(f"i{v}")
+    except ValueError:
+        pass
     return jsonify(ok=True)
 
 @app.route("/stream-logs")
