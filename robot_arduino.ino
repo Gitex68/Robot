@@ -157,7 +157,7 @@ void autonomousDrive() {
 
     int centerX = sharedResult.xCenter;
     int frameCenter = 160; 
-    int deadBand = 25; // Augmenté légèrement pour éviter les oscillations rapides
+    int deadBand = 25; 
 
     if (centerX < frameCenter - deadBand) {
         rotationAntiHoraire();
@@ -175,14 +175,15 @@ void systemMenu() {
     if (cmd == 'M') { modeAutomatique = false; stopRobot(); return; }
 
     if (cmd == 'V') {
-        // Correction cruciale : On attend que la valeur numérique soit complètement reçue
         while (Serial.available() == 0) { delay(2); }
         int v = Serial.parseInt();
         vitesse = constrain(v, 0, 255);
         return;
     }
 
-    if (modeAutomatique) return; 
+    // En mode auto, on ignore uniquement les commandes de déplacement
+    bool isMoveCmd = (cmd == 'z' || cmd == 's' || cmd == 'q' || cmd == 'd' || cmd == 'a' || cmd == 'e' || cmd == 'x');
+    if (modeAutomatique && isMoveCmd) return;
 
     switch (cmd) {
         case '1': huskylens.writeAlgorithm(ALGORITHM_FACE_RECOGNITION); currentAlgoName = "Face Recognition"; break;
