@@ -6,16 +6,14 @@ import threading
 
 app = Flask(__name__)
 
-# File d'attente pour partager les logs de la liaison série avec le site web
 log_queue = queue.Queue(maxsize=100)
 
 def add_log(message: str):
-    """Ajoute un message horodaté dans la console du site web."""
     timestamp = time.strftime("%H:%M:%S")
     log_line = f"[{timestamp}] {message}"
     try:
         if log_queue.full():
-            log_queue.get_nowait()  # Supprime le plus vieux si plein
+            log_queue.get_nowait()
         log_queue.put_nowait(log_line)
     except Exception:
         pass
@@ -30,7 +28,16 @@ except Exception as e:
     add_log(f"Erreur : Impossible de contacter l'Arduino ({e}).")
     ser = None
 
-# Thread de lecture pour écouter l'Arduino en tâche de fond (les logs HuskyLens)
+# FONCTION PLACÉE AU BON ENDROIT (Avant les @app.route)
+def send_serial(msg: str):
+    if ser:
+        try:
+            ser.write(msg.encode("utf-8"))
+            add_log(f"Pi ➡️ Arduino : Tx '{msg}'")
+        except Exception as e:
+            add_log(f"Erreur d'écriture Série : {e}")
+            pass
+
 def serial_reader():
     while True:
         if ser and ser.is_open:
@@ -74,146 +81,32 @@ HTML = """
       display: flex;
       justify-content: center;
       padding: 20px;
-      padding-bottom: 280px; /* Assure que le contenu reste accessible */
+      padding-bottom: 280px;
       user-select: none;
     }
-    .container {
-      width: 100%;
-      max-width: 420px;
-      display: grid;
-      gap: 16px;
-    }
-    .card {
-      background: var(--card);
-      border-radius: 16px;
-      padding: 16px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.35);
-    }
-    .title {
-      text-align: center;
-      font-weight: 700;
-      letter-spacing: 0.5px;
-      color: var(--accent);
-    }
-    .toggle {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-    }
-    .switch {
-      position: relative;
-      width: 72px;
-      height: 36px;
-      background: #2b3242;
-      border-radius: 999px;
-      cursor: pointer;
-      transition: 0.2s;
-    }
-    .switch::after {
-      content: "";
-      position: absolute;
-      width: 28px;
-      height: 28px;
-      background: var(--accent);
-      border-radius: 50%;
-      top: 4px;
-      left: 4px;
-      transition: 0.2s;
-      box-shadow: 0 0 10px rgba(77,208,225,0.6);
-    }
-    .switch.on {
-      background: #25333f;
-    }
-    .switch.on::after {
-      left: 40px;
-      background: var(--accent2);
-      box-shadow: 0 0 10px rgba(129,199,132,0.6);
-    }
-    .mode-label {
-      font-weight: 700;
-      color: var(--accent);
-    }
-    .mode-label.on {
-      color: var(--accent2);
-    }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      grid-gap: 12px;
-      margin: 10px 0;
-    }
-    button {
-      background: #263042;
-      color: var(--text);
-      border: 1px solid #2f3a52;
-      border-radius: 12px;
-      padding: 18px 8px;
-      font-size: 1.4rem;
-      cursor: pointer;
-      transition: 0.15s;
-      touch-action: manipulation;
-    }
+    .container { width: 100%; max-width: 420px; display: grid; gap: 16px; }
+    .card { background: var(--card); border-radius: 16px; padding: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
+    .title { text-align: center; font-weight: 700; letter-spacing: 0.5px; color: var(--accent); }
+    .toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .switch { position: relative; width: 72px; height: 36px; background: #2b3242; border-radius: 999px; cursor: pointer; transition: 0.2s; }
+    .switch::after { content: ""; position: absolute; width: 28px; height: 28px; background: var(--accent); border-radius: 50%; top: 4px; left: 4px; transition: 0.2s; box-shadow: 0 0 10px rgba(77,208,225,0.6); }
+    .switch.on { background: #25333f; }
+    .switch.on::after { left: 40px; background: var(--accent2); box-shadow: 0 0 10px rgba(129,199,132,0.6); }
+    .mode-label { font-weight: 700; color: var(--accent); }
+    .mode-label.on { color: var(--accent2); }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); grid-gap: 12px; margin: 10px 0; }
+    button { background: #263042; color: var(--text); border: 1px solid #2f3a52; border-radius: 12px; padding: 18px 8px; font-size: 1.4rem; cursor: pointer; transition: 0.15s; touch-action: manipulation; }
     button:hover { background: #2f3a52; }
     button:active { background: var(--accent); }
     .stop { background: var(--danger); border: none; font-weight: 700; }
     .stop:active { background: #ff7675; }
-    .slider {
-      width: 100%;
-      margin: 10px 0;
-    }
-    .disabled {
-      opacity: 0.25;
-      pointer-events: none;
-      filter: grayscale(0.6);
-    }
+    .slider { width: 100%; margin: 10px 0; }
+    .disabled { opacity: 0.25; pointer-events: none; filter: grayscale(0.6); }
     .muted { color: var(--muted); font-size: 12px; text-align: center; }
-    
-    .video-stream {
-      width: 100%;
-      border-radius: 8px;
-      margin-top: 10px;
-      background: #000;
-      aspect-ratio: 4/3;
-    }
-
-    /* --- STRUCTURE DE LA ZONE MONITEUR SÉRIE --- */
-    .terminal-container {
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      background: var(--terminal-bg);
-      border-top: 4px solid var(--accent);
-      z-index: 1000;
-      display: flex;
-      flex-direction: column;
-      height: 180px; /* Hauteur par défaut explicite */
-      min-height: 80px;
-      max-height: 80vh;
-    }
-    .terminal-header {
-      background: #141923;
-      padding: 14px 16px;
-      font-size: 11px;
-      font-weight: bold;
-      color: var(--accent);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      cursor: ns-resize;
-      user-select: none;
-      touch-action: none; /* Bloque le scroll de la page au toucher sur le bandeau */
-    }
-    .terminal-body {
-      flex: 1;
-      padding: 12px;
-      font-family: 'Courier New', Courier, monospace;
-      font-size: 11px;
-      color: #39ff14;
-      overflow-y: auto;
-      white-space: pre-wrap;
-    }
+    .video-stream { width: 100%; border-radius: 8px; margin-top: 10px; background: #000; aspect-ratio: 4/3; }
+    .terminal-container { position: fixed; bottom: 0; left: 0; right: 0; background: var(--terminal-bg); border-top: 4px solid var(--accent); z-index: 1000; display: flex; flex-direction: column; height: 180px; min-height: 80px; max-height: 80vh; }
+    .terminal-header { background: #141923; padding: 14px 16px; font-size: 11px; font-weight: bold; color: var(--accent); display: flex; justify-content: space-between; align-items: center; cursor: ns-resize; user-select: none; touch-action: none; }
+    .terminal-body { flex: 1; padding: 12px; font-family: 'Courier New', Courier, monospace; font-size: 11px; color: #39ff14; overflow-y: auto; white-space: pre-wrap; }
   </style>
 </head>
 <body>
@@ -236,16 +129,14 @@ HTML = """
 
     <div id="controls" class="card">
       <div class="grid">
-        <button data-cmd="a">↩️</button>
-        <button data-cmd="z">⬆️</button>
-        <button data-cmd="e">↪️</button>
-
-        <button data-cmd="q">⬅️</button>
-        <button class="stop" data-cmd="x">🛑</button>
-        <button data-cmd="d">➡️</button>
-
+        <button class="hold-btn" data-cmd="a">↩️</button>
+        <button class="hold-btn" data-cmd="z">⬆️</button>
+        <button class="hold-btn" data-cmd="e">↪️</button>
+        <button class="hold-btn" data-cmd="q">⬅️</button>
+        <button class="stop hold-btn" data-cmd="x">🛑</button>
+        <button class="hold-btn" data-cmd="d">➡️</button>
         <div></div>
-        <button data-cmd="s">⬇️</button>
+        <button class="hold-btn" data-cmd="s">⬇️</button>
         <div></div>
       </div>
     </div>
@@ -277,7 +168,6 @@ HTML = """
     const terminalContainer = document.getElementById("terminalContainer");
 
     let autoMode = false;
-
     const piIP = window.location.hostname;
     document.getElementById("videoFeed").src = `http://${piIP}:8080/?action=stream`;
 
@@ -296,12 +186,27 @@ HTML = """
       await fetch(`/mode/${type}`);
     });
 
+    const HOLD_INTERVAL_MS = 140;
+    let holdTimer = null;
+
+    function sendCmd(cmd) { fetch(`/commande/${cmd}`); }
+    function startHold(cmd) { sendCmd(cmd); holdTimer = setInterval(() => sendCmd(cmd), HOLD_INTERVAL_MS); }
+    function endHold() { if (holdTimer) { clearInterval(holdTimer); holdTimer = null; } }
+
     document.querySelectorAll("button[data-cmd]").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const cmd = btn.getAttribute("data-cmd");
-        await fetch(`/commande/${cmd}`);
-      });
+      const cmd = btn.getAttribute("data-cmd");
+      if (btn.classList.contains("hold-btn")) {
+        btn.addEventListener("pointerdown", (e) => { e.preventDefault(); startHold(cmd); });
+        btn.addEventListener("pointerup", endHold);
+        btn.addEventListener("pointerleave", endHold);
+        btn.addEventListener("pointercancel", endHold);
+        btn.addEventListener("click", (e) => e.preventDefault());
+      } else {
+        btn.addEventListener("click", async () => { await fetch(`/commande/${cmd}`); });
+      }
     });
+
+    window.addEventListener("pointerup", endHold);
 
     speed.addEventListener("input", async () => {
       const val = speed.value;
@@ -309,49 +214,27 @@ HTML = """
       await fetch(`/vitesse/${val}`);
     });
 
-    // RECEPTION EN FLUX CONTINU
     const eventSource = new EventSource("/stream-logs");
     eventSource.onmessage = function(event) {
         const shouldScroll = terminalBody.scrollTop + terminalBody.clientHeight >= terminalBody.scrollHeight - 25;
         terminalBody.textContent += event.data + "\\n";
-        if (shouldScroll) {
-            terminalBody.scrollTop = terminalBody.scrollHeight;
-        }
+        if (shouldScroll) { terminalBody.scrollTop = terminalBody.scrollHeight; }
     };
 
-    // --- CORRECTION SYSTEME COMPACTE D'ÉTIREMENT SUR CONTAINER GLOBAL ---
     let isResizing = false;
-
-    function initResize(e) {
-      isResizing = true;
-      if (e.cancelable) e.preventDefault();
-    }
-
+    function initResize(e) { isResizing = true; if (e.cancelable) e.preventDefault(); }
     function handleResize(e) {
       if (!isResizing) return;
       if (e.cancelable) e.preventDefault();
-
-      // Extrait la coordonnée verticale (Souris ou Point de contact tactile)
       const currentY = e.touches ? e.touches[0].clientY : e.clientY;
-      
-      // Calcule dynamiquement la hauteur requise depuis le bas de la fenêtre
       const computedHeight = window.innerHeight - currentY;
-
-      // Application des règles de butée haute et basse
-      if (computedHeight >= 80 && computedHeight <= (window.innerHeight * 0.8)) {
-        terminalContainer.style.height = `${computedHeight}px`;
-      }
+      if (computedHeight >= 80 && computedHeight <= (window.innerHeight * 0.8)) { terminalContainer.style.height = `${computedHeight}px`; }
     }
+    function endResize() { isResizing = false; }
 
-    function endResize() {
-      isResizing = false;
-    }
-
-    // Assignation des écouteurs de contrôle d'interface sur le conteneur principal
     terminalHeader.addEventListener('mousedown', initResize);
     window.addEventListener('mousemove', handleResize, { passive: false });
     window.addEventListener('mouseup', endResize);
-
     terminalHeader.addEventListener('touchstart', initResize, { passive: false });
     window.addEventListener('touchmove', handleResize, { passive: false });
     window.addEventListener('touchend', endResize);
@@ -362,25 +245,13 @@ HTML = """
 </html>
 """
 
-def send_serial(msg: str):
-    if ser:
-        try:
-            ser.write(msg.encode("utf-8"))
-            add_log(f"Pi ➡️ Arduino : Tx '{msg}'")
-        except Exception as e:
-            add_log(f"Erreur d'écriture Série : {e}")
-            pass
-
 @app.route("/")
-def index():
-    return render_template_string(HTML)
+def index(): return render_template_string(HTML)
 
 @app.route("/mode/<type>")
 def mode(type):
-    if type == "auto":
-        send_serial("A")
-    else:
-        send_serial("M")
+    if type == "auto": send_serial("A")
+    else: send_serial("M")
     return jsonify(ok=True)
 
 @app.route("/vitesse/<valeur>")
@@ -389,14 +260,12 @@ def vitesse(valeur):
         v = int(valeur)
         v = max(0, min(255, v))
         send_serial(f"V{v}")
-    except ValueError:
-        pass
+    except ValueError: pass
     return jsonify(ok=True)
 
 @app.route("/commande/<direction>")
 def commande(direction):
-    if direction:
-        send_serial(direction[0])
+    if direction: send_serial(direction[0])
     return jsonify(ok=True)
 
 @app.route("/stream-logs")

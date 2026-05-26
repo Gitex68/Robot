@@ -26,16 +26,20 @@ void systemMenu();
 void autonomousDrive();
 
 void setup() {
-    Serial.begin(9600); // 9600 bauds pour la Pi 2
+    Serial.begin(9600); // 9600 bauds pour la Pi
     Wire.begin(); 
     Wire.setClock(400000); 
 
+    // [HUSKYLENS DÉSACTIVÉE POUR LES TESTS MANUELS]
+    /*
     while (!huskylens.begin(Wire)) {
         Serial.println(F("Erreur HuskyLens..."));
         delay(1000);
     }
+    */
+    
     Serial.println(F("========================================"));
-    Serial.println(F("    SYSTEME MOTEUR + CAM OK            "));
+    Serial.println(F("    SYSTEME MOTEUR OK (SANS HUSKY)      "));
     Serial.println(F("========================================"));
     stopRobot(); 
 }
@@ -43,14 +47,14 @@ void setup() {
 void loop() {
     targetDetected = false;
 
-    // Étape 1 : On centralise l'acquisition HuskyLens au début de la loop
+    // [HUSKYLENS DÉSACTIVÉE POUR LES TESTS MANUELS]
+    /*
     if (huskylens.request() && huskylens.available() > 0) {
         targetDetected = true;
-        sharedResult = huskylens.read(); // On mémorise la première cible principale
-        
-        // Affichage OSD / Logs si nécessaire
+        sharedResult = huskylens.read(); 
         displayAdvancedInfo();
     }
+    */
 
     // Étape 2 : Écoute des paquets série provenant de la Pi
     if (Serial.available()) {
@@ -113,8 +117,6 @@ void rotationAntiHoraire() {
 
 void displayAdvancedInfo() {
     if (!targetDetected) return;
-
-    // Filtre des ID ou modes d'affichage requis
     if (displayMode == 2 && sharedResult.command != COMMAND_RETURN_BLOCK) return;
     if (displayMode == 3 && sharedResult.command != COMMAND_RETURN_ARROW) return;
     if (targetID != 0 && sharedResult.ID != targetID) return;
@@ -144,7 +146,6 @@ void forceWriteOSD(String text, int x, int y) {
 }
 
 void autonomousDrive() {
-    // Si aucune cible n'est détectée à ce cycle, arrêt de sûreté
     if (!targetDetected) {
         stopRobot();
         return;
@@ -157,7 +158,7 @@ void autonomousDrive() {
 
     int centerX = sharedResult.xCenter;
     int frameCenter = 160; 
-    int deadBand = 25; // Augmenté légèrement pour éviter les oscillations rapides
+    int deadBand = 25; 
 
     if (centerX < frameCenter - deadBand) {
         rotationAntiHoraire();
@@ -175,14 +176,14 @@ void systemMenu() {
     if (cmd == 'M') { modeAutomatique = false; stopRobot(); return; }
 
     if (cmd == 'V') {
-        // Correction cruciale : On attend que la valeur numérique soit complètement reçue
         while (Serial.available() == 0) { delay(2); }
         int v = Serial.parseInt();
         vitesse = constrain(v, 0, 255);
         return;
     }
 
-    if (modeAutomatique) return; 
+    bool isMoveCmd = (cmd == 'z' || cmd == 's' || cmd == 'q' || cmd == 'd' || cmd == 'a' || cmd == 'e' || cmd == 'x');
+    if (modeAutomatique && isMoveCmd) return;
 
     switch (cmd) {
         case '1': huskylens.writeAlgorithm(ALGORITHM_FACE_RECOGNITION); currentAlgoName = "Face Recognition"; break;
@@ -193,7 +194,6 @@ void systemMenu() {
         case '6': huskylens.writeAlgorithm(ALGORITHM_TAG_RECOGNITION); currentAlgoName = "Tag Recognition"; break;
         case 'i': Serial.println(F("ID cible ?")); while(!Serial.available()); targetID = Serial.parseInt(); break;
         
-        // Alignement avec l'interface HTML
         case 'z': avancer(); break;
         case 's': reculer(); break;
         case 'q': glisserGauche(); break;
