@@ -2,6 +2,7 @@
 #include <SoftwareSerial.h>     // [PARTIE CAM]
 #include "DFRobot_HuskyLens.h"  // [PARTIE CAM]
 #include <Wire.h>               // [PARTIE CAM]
+#include <Servo.h>              // [ULTRASON + SERVO]
 
 AF_DCMotor motor1(1); 
 AF_DCMotor motor2(2); 
@@ -21,14 +22,32 @@ bool modeAutomatique = false;
 bool targetDetected = false;
 HUSKYLENSResult sharedResult;
 
+const int TRIG_PIN = 7;
+const int ECHO_PIN = 8;
+const int SERVO_PIN = 9;
+const int SERVO_CENTER = 90;
+
+Servo scanServo;
+
 void displayAdvancedInfo();
 void systemMenu();
 void autonomousDrive();
+long readDistanceCM();
+long readDistanceAt(int angle);
+void avancerDiagGauche();
+void avancerDiagDroite();
+void reculerDiagGauche();
+void reculerDiagDroite();
 
 void setup() {
     Serial.begin(9600); // 9600 bauds pour la Pi
     Wire.begin(); 
     Wire.setClock(400000); 
+
+    pinMode(TRIG_PIN, OUTPUT);
+    pinMode(ECHO_PIN, INPUT);
+    scanServo.attach(SERVO_PIN);
+    scanServo.write(SERVO_CENTER);
 
     // [HUSKYLENS DÉSACTIVÉE POUR LES TESTS MANUELS]
     /*
@@ -145,28 +164,79 @@ void forceWriteOSD(String text, int x, int y) {
     Wire.endTransmission();
 }
 
+long readDistanceCM() {
+    digitalWrite(TRIG_PIN, LOW);
+    delayMicroseconds(2);
+    digitalWrite(TRIG_PIN, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(TRIG_PIN, LOW);
+
+    long duration = pulseIn(ECHO_PIN, HIGH, 25000); // ~4m max
+    if (duration == 0) return 999;
+    long distance = duration / 58;
+    return distance;
+}
+
+long readDistanceAt(int angle) {
+    scanServo.write(angle);
+    delay(120);
+    return readDistanceCM();
+}
+
+void avancerDiagGauche() {
+  setVitesse(vitesse);
+  motor1.run(FORWARD); motor4.run(FORWARD);
+  motor2.run(RELEASE); motor3.run(RELEASE);
+}
+
+void avancerDiagDroite() {
+  setVitesse(vitesse);
+  motor2.run(FORWARD); motor3.run(FORWARD);
+  motor1.run(RELEASE); motor4.run(RELEASE);
+}
+
+void reculerDiagGauche() {
+  setVitesse(vitesse);
+  motor1.run(BACKWARD); motor4.run(BACKWARD);
+  motor2.run(RELEASE);  motor3.run(RELEASE);
+}
+
+void reculerDiagDroite() {
+  setVitesse(vitesse);
+  motor2.run(BACKWARD); motor3.run(BACKWARD);
+  motor1.run(RELEASE);  motor4.run(RELEASE);
+}
+
 void autonomousDrive() {
-    if (!targetDetected) {
-        stopRobot();
-        return;
-    }
+    long frontDist = readDistanceAt(SERVO_CENTER);
 
-    if (sharedResult.command != COMMAND_RETURN_BLOCK) {
-        stopRobot();
-        return;
-    }
+    if (frontDist < 30) {
+        int autoSpeed = map(constrain((int)frontDist, 5, 30), 5, 30, 80, vitesse);
+        setVitesse(autoSpeed);
 
-    int centerX = sharedResult.xCenter;
-    int frameCenter = 160; 
-    int deadBand = 25; 
+        if (frontDist < 15) {
+            stopRobot();
 
-    if (centerX < frameCenter - deadBand) {
-        rotationAntiHoraire();
-    } else if (centerX > frameCenter + deadBand) {
-        rotationHoraire();
-    } else {
+            long leftDist = readDistanceAt(30);
+            long rightDist = readDistanceAt(150);
+            scanServo.write(SERVO_CENTER);
+
+            if (leftDist > rightDist && leftDist > 30) {
+                glisserGauche();
+            } else if (rightDist > leftDist && rightDist > 30) {
+                glisserDroite();
+            } else {
+                reculer();
+            }
+            return;
+        }
+
         avancer();
+        return;
     }
+
+    setVitesse(vitesse);
+    avancer();
 }
 
 void systemMenu() {
@@ -182,7 +252,8 @@ void systemMenu() {
         return;
     }
 
-    bool isMoveCmd = (cmd == 'z' || cmd == 's' || cmd == 'q' || cmd == 'd' || cmd == 'a' || cmd == 'e' || cmd == 'x');
+    bool isMoveCmd = (cmd == 'z' || cmd == 's' || cmd == 'q' || cmd == 'd' || cmd == 'a' || cmd == 'e' || cmd == 'x' ||
+                      cmd == 'u' || cmd == 'i' || cmd == 'j' || cmd == 'k');
     if (modeAutomatique && isMoveCmd) return;
 
     switch (cmd) {
@@ -200,6 +271,10 @@ void systemMenu() {
         case 'd': glisserDroite(); break;
         case 'a': rotationAntiHoraire(); break;
         case 'e': rotationHoraire(); break;
+        case 'u': avancerDiagGauche(); break;
+        case 'i': avancerDiagDroite(); break;
+        case 'j': reculerDiagGauche(); break;
+        case 'k': reculerDiagDroite(); break;
         case 'x': stopRobot(); break;
         
         case 'r': targetID = 0; displayMode = 1; stopRobot(); break;
