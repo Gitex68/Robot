@@ -129,14 +129,16 @@ HTML = """
 
     <div id="controls" class="card">
       <div class="grid">
-        <button class="hold-btn" data-cmd="a">↩️</button>
-        <button class="hold-btn" data-cmd="z">⬆️</button>
-        <button class="hold-btn" data-cmd="e">↪️</button>
-        <button class="hold-btn" data-cmd="q">⬅️</button>
-        <button class="stop hold-btn" data-cmd="x">🛑</button>
-        <button class="hold-btn" data-cmd="d">➡️</button>
+        <button class="move-btn" data-move="rotL">↩️</button>
+        <button class="move-btn" data-move="up">⬆️</button>
+        <button class="move-btn" data-move="rotR">↪️</button>
+
+        <button class="move-btn" data-move="left">⬅️</button>
+        <button class="stop move-btn" data-move="stop">🛑</button>
+        <button class="move-btn" data-move="right">➡️</button>
+
         <div></div>
-        <button class="hold-btn" data-cmd="s">⬇️</button>
+        <button class="move-btn" data-move="down">⬇️</button>
         <div></div>
       </div>
     </div>
@@ -145,6 +147,23 @@ HTML = """
       <label id="speedLabel">Vitesse : 200</label>
       <input id="speed" class="slider" type="range" min="0" max="255" value="200" />
       <div class="muted">0 → 255</div>
+    </div>
+
+    <div id="huskyControls" class="card">
+      <div class="title" style="margin-bottom:8px;">HuskyLens</div>
+      <div class="grid">
+        <button data-cmd="1">Visage</button>
+        <button data-cmd="2">Suivi</button>
+        <button data-cmd="3">Objet</button>
+
+        <button data-cmd="4">Ligne</button>
+        <button data-cmd="5">Couleur</button>
+        <button data-cmd="6">Tag</button>
+
+        <button id="setIdBtn">ID Cible</button>
+        <button data-cmd="r">Reset</button>
+        <div></div>
+      </div>
     </div>
   </div>
 
@@ -166,8 +185,10 @@ HTML = """
     const terminalBody = document.getElementById("terminalBody");
     const terminalHeader = document.getElementById("terminalHeader");
     const terminalContainer = document.getElementById("terminalContainer");
+    const setIdBtn = document.getElementById("setIdBtn");
 
     let autoMode = false;
+
     const piIP = window.location.hostname;
     document.getElementById("videoFeed").src = `http://${piIP}:8080/?action=stream`;
 
@@ -186,32 +207,79 @@ HTML = """
       await fetch(`/mode/${type}`);
     });
 
-    const HOLD_INTERVAL_MS = 140;
-    let holdTimer = null;
+    const pressed = new Set();
+    let lastCmd = "x";
 
-    function sendCmd(cmd) { fetch(`/commande/${cmd}`); }
-    function startHold(cmd) { sendCmd(cmd); holdTimer = setInterval(() => sendCmd(cmd), HOLD_INTERVAL_MS); }
-    function endHold() { if (holdTimer) { clearInterval(holdTimer); holdTimer = null; } }
+    function computeMoveCmd() {
+      const up = pressed.has("up");
+      const down = pressed.has("down");
+      const left = pressed.has("left");
+      const right = pressed.has("right");
+      const rotL = pressed.has("rotL");
+      const rotR = pressed.has("rotR");
+
+      if (up && left) return "u";
+      if (up && right) return "i";
+      if (down && left) return "j";
+      if (down && right) return "k";
+      if (up) return "z";
+      if (down) return "s";
+      if (left) return "q";
+      if (right) return "d";
+      if (rotL) return "a";
+      if (rotR) return "e";
+      return "x";
+    }
+
+    function updateMovement() {
+      const cmd = computeMoveCmd();
+      if (cmd !== lastCmd) {
+        fetch(`/commande/${cmd}`);
+        lastCmd = cmd;
+      }
+    }
+
+    document.querySelectorAll(".move-btn").forEach(btn => {
+      const move = btn.getAttribute("data-move");
+
+      btn.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        btn.setPointerCapture(e.pointerId);
+        pressed.add(move);
+        updateMovement();
+      });
+
+      btn.addEventListener("pointerup", (e) => {
+        e.preventDefault();
+        pressed.delete(move);
+        updateMovement();
+      });
+
+      btn.addEventListener("pointercancel", (e) => {
+        e.preventDefault();
+        pressed.delete(move);
+        updateMovement();
+      });
+    });
 
     document.querySelectorAll("button[data-cmd]").forEach(btn => {
       const cmd = btn.getAttribute("data-cmd");
-      if (btn.classList.contains("hold-btn")) {
-        btn.addEventListener("pointerdown", (e) => { e.preventDefault(); startHold(cmd); });
-        btn.addEventListener("pointerup", endHold);
-        btn.addEventListener("pointerleave", endHold);
-        btn.addEventListener("pointercancel", endHold);
-        btn.addEventListener("click", (e) => e.preventDefault());
-      } else {
-        btn.addEventListener("click", async () => { await fetch(`/commande/${cmd}`); });
-      }
+      btn.addEventListener("click", async () => {
+        await fetch(`/commande/${cmd}`);
+      });
     });
-
-    window.addEventListener("pointerup", endHold);
 
     speed.addEventListener("input", async () => {
       const val = speed.value;
       speedLabel.textContent = `Vitesse : ${val}`;
       await fetch(`/vitesse/${val}`);
+    });
+
+    setIdBtn.addEventListener("click", async () => {
+      const id = prompt("Entrer l'ID cible HuskyLens (ex: 1)");
+      if (id !== null && id !== "") {
+        await fetch(`/husky/id/${id}`);
+      }
     });
 
     const eventSource = new EventSource("/stream-logs");
@@ -275,6 +343,16 @@ def stream_logs():
             log_item = log_queue.get() 
             yield f"data: {log_item}\n\n"
     return Response(generate(), mimetype="text/event-stream")
+
+@app.route("/husky/id/<valeur>")
+def husky_id(valeur):
+    try:
+        v = int(valeur)
+        v = max(0, min(999, v))
+        send_serial(f"i{v}")
+    except ValueError:
+        pass
+    return jsonify(ok=True)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)
